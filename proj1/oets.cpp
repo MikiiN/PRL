@@ -18,9 +18,9 @@ bool is_even(int num){
 }
 
 int main(int argc, char *argv[]){
+    int procID, processesNum;
     MPI_Init(&argc, &argv);
 
-    int procID, processesNum;
     MPI_Comm_size(MPI_COMM_WORLD, &processesNum);
     MPI_Comm_rank(MPI_COMM_WORLD, &procID);
 
@@ -46,9 +46,9 @@ int main(int argc, char *argv[]){
 
     MPI_Status stat;
     int myNum;
-    MPI_Recv(&myNum, 1, MPI_INT, 0, TAG, MPI_COMM_WORLD, &stat);
+    MPI_Recv(&myNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD, &stat);
 
-    // TODO deadlock
+    // TODO testing
     int numCycles = processesNum/2 + processesNum%2;
     for(int i = 0; i < numCycles; i++){
         if(is_even(procID) && procID < (processesNum-1)){
@@ -71,7 +71,7 @@ int main(int argc, char *argv[]){
             MPI_Send(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD);
             MPI_Recv(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &stat);
         }
-        else if(is_even(procID)){
+        else if(is_even(procID) && procID > 0){
             int neighbourNum;
             MPI_Recv(&neighbourNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD, &stat);
             if(myNum < neighbourNum){
