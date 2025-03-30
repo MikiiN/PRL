@@ -1,3 +1,9 @@
+/*
+* Project: PRL-proj1
+* Author:  Michal Žatečka xzatec02
+* Date:    30.03.2025
+*/
+
 #include <mpi.h>
 #include <iostream>
 #include <fstream>
@@ -6,8 +12,6 @@
 #define ERROR 1
 #define MASTER_ID 0
 #define TAG 0
-
-using namespace std;
 
 bool is_odd(int num){
     return num % 2 == 1;
@@ -25,24 +29,29 @@ bool has_right_neighbour(int proc, int count){
     return proc < (count-1); 
 }
 
+int get_number_of_cycles(int processesNum){
+    return (processesNum / 2) + (processesNum % 2);
+}
+
 void load_and_send_numbers(){
     char loadedNum; 
     int actualprocNum = 0;
 
-    ifstream fileNum(INPUT);
+    // open input file
+    std::ifstream fileNum(INPUT);
     if(!fileNum){
-        cerr << "Err: Can't open file numbers" << endl;
+        std::cerr << "Err: Can't open file numbers" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, ERROR);
     }
 
     // load all numbers, print them on STDOUT and send them to processes
     while(fileNum.get(loadedNum)){
         int num = (unsigned char) loadedNum;
-        cout << num << " ";
+        std::cout << num << " ";
         MPI_Send(&num, 1, MPI_INT, actualprocNum, TAG, MPI_COMM_WORLD);
         actualprocNum++;
     }
-    cout << endl;
+    std::cout << std::endl;
 
     fileNum.close();
 }
@@ -65,7 +74,7 @@ int main(int argc, char *argv[]){
     MPI_Recv(&myNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
 
     // sorting
-    int numCycles = processesNum/2 + processesNum%2;
+    int numCycles = get_number_of_cycles(processesNum);
     for(int i = 0; i < numCycles; i++){
         // even processes
         if(is_even(procID) && has_right_neighbour(procID, processesNum)){
@@ -74,7 +83,7 @@ int main(int argc, char *argv[]){
             MPI_Recv(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &status);
         }
         // odd processes
-        else if(is_odd(procID)){
+        else if(is_odd(procID) && has_left_neighbour(procID)){
             int neighbourNum;
             // receive number from even neighbour
             MPI_Recv(&neighbourNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD, &status);
@@ -113,9 +122,11 @@ int main(int argc, char *argv[]){
     int result[processesNum];
     for(int id = 1; id < processesNum; id++){
         if(procID == id){
+            // slave process send its number
             MPI_Send(&myNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
         }
         if(procID == MASTER_ID){
+            // master process receive number and store it on correct position in array
             MPI_Recv(&(result[id]), 1, MPI_INT, id, TAG, MPI_COMM_WORLD, &status);
         }
     }
@@ -124,7 +135,7 @@ int main(int argc, char *argv[]){
     if(procID == MASTER_ID){
         result[MASTER_ID] = myNum;
         for(int i = 0; i < processesNum; i++){
-            cout << result[i] << endl;
+            std::cout << result[i] << std::endl;
         }
     }
 
