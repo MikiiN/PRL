@@ -34,9 +34,6 @@ int get_number_of_cycles(int processesNum){
 }
 
 void load_and_send_numbers(){
-    char loadedNum; 
-    int actualprocNum = 0;
-
     // open input file
     std::ifstream fileNum(INPUT);
     if(!fileNum){
@@ -44,12 +41,14 @@ void load_and_send_numbers(){
         MPI_Abort(MPI_COMM_WORLD, ERROR);
     }
 
+    char loadedNum; 
+    int procIndex = 0;
     // load all numbers, print them on STDOUT and send them to processes
     while(fileNum.get(loadedNum)){
         int num = (unsigned char) loadedNum;
         std::cout << num << " ";
-        MPI_Send(&num, 1, MPI_INT, actualprocNum, TAG, MPI_COMM_WORLD);
-        actualprocNum++;
+        MPI_Send(&num, 1, MPI_INT, procIndex, TAG, MPI_COMM_WORLD);
+        procIndex++;
     }
     std::cout << std::endl;
 
@@ -69,9 +68,9 @@ int main(int argc, char *argv[]){
     }
 
     MPI_Status status;
-    int myNum;
+    int procNum;
     // process receive it's number
-    MPI_Recv(&myNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
+    MPI_Recv(&procNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
 
     // sorting
     int numCycles = get_number_of_cycles(processesNum);
@@ -79,8 +78,8 @@ int main(int argc, char *argv[]){
         // even processes
         if(is_even(procID) && has_right_neighbour(procID, processesNum)){
             // send its number and waiting until neighbour process send number back
-            MPI_Send(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD);
-            MPI_Recv(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &status);
+            MPI_Send(&procNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD);
+            MPI_Recv(&procNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &status);
         }
         // odd processes
         else if(is_odd(procID) && has_left_neighbour(procID)){
@@ -88,11 +87,11 @@ int main(int argc, char *argv[]){
             // receive number from even neighbour
             MPI_Recv(&neighbourNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD, &status);
             // compare with own number
-            if(myNum < neighbourNum){
+            if(procNum < neighbourNum){
                 // process's number is smaller, so process keeps neighbour number
                 // and send its number back (swap)
-                MPI_Send(&myNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD);
-                myNum = neighbourNum;
+                MPI_Send(&procNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD);
+                procNum = neighbourNum;
             }
             else{
                 // process's number is bigger or equal (no swap)
@@ -102,15 +101,15 @@ int main(int argc, char *argv[]){
 
         // same like before, just now odd processes send and even processes compare
         if(is_odd(procID) && has_right_neighbour(procID, processesNum)){
-            MPI_Send(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD);
-            MPI_Recv(&myNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &status);
+            MPI_Send(&procNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD);
+            MPI_Recv(&procNum, 1, MPI_INT, procID + 1, TAG, MPI_COMM_WORLD, &status);
         }
         else if(is_even(procID) && has_left_neighbour(procID)){
             int neighbourNum;
             MPI_Recv(&neighbourNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD, &status);
-            if(myNum < neighbourNum){
-                MPI_Send(&myNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD);
-                myNum = neighbourNum;
+            if(procNum < neighbourNum){
+                MPI_Send(&procNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD);
+                procNum = neighbourNum;
             }
             else{
                 MPI_Send(&neighbourNum, 1, MPI_INT, procID - 1, TAG, MPI_COMM_WORLD);
@@ -123,7 +122,7 @@ int main(int argc, char *argv[]){
     for(int id = 1; id < processesNum; id++){
         if(procID == id){
             // slave process send its number
-            MPI_Send(&myNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+            MPI_Send(&procNum, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
         }
         if(procID == MASTER_ID){
             // master process receive number and store it on correct position in array
@@ -133,7 +132,7 @@ int main(int argc, char *argv[]){
 
     // master process print sorted numbers on STDOUT
     if(procID == MASTER_ID){
-        result[MASTER_ID] = myNum;
+        result[MASTER_ID] = procNum;
         for(int i = 0; i < processesNum; i++){
             std::cout << result[i] << std::endl;
         }
