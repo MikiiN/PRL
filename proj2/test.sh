@@ -7,9 +7,10 @@ fi;
 # preklad
 mpic++ --prefix /usr/local/share/OpenMPI -o vuv vuv.cpp
 
-
+length=${#1}
+proc_number=$(((2*length)-2))
 # spusteni aplikace (oversubscribe - vice procesu nez fyzicky k dispozici)
-mpirun --oversubscribe -np 1 ./vuv $1 
+mpirun --oversubscribe -np $proc_number ./vuv $1 
 
 # uklid
 rm -f vuv

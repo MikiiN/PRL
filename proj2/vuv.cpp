@@ -80,7 +80,6 @@ vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     size_t parent = getNodeParent(node_index, tree_len);
     tie(left_child, right_child) = getNodeChildrenIndexes(node_index, tree_len);
 
-    
     if(parent != NOT_EXIST){
         AdjacencyListNode p_node = createNode(node_index, parent);
         result.push_back(p_node);
