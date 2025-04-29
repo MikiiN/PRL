@@ -5,6 +5,7 @@
 */
 
 #include <bits/stdc++.h>
+#include <cstddef>
 #include <mpi.h>
 #include <iostream>
 #include <string>
@@ -13,13 +14,16 @@
 using namespace std;
 
 #define BASE 2
+#define MASTER_ID 0
 #define NOT_EXIST -1
 #define ROOT_INDEX 0
+#define TAG 0
+
 
 typedef struct g_edge {
-    size_t start;
-    size_t end;
-}Edge;
+    int start;
+    int end;
+}Edge; 
 
 typedef struct adj_node {
     Edge forward;
@@ -40,9 +44,7 @@ int getNodeDepth(size_t node_index, size_t tree_len){
 }
 
 tuple<size_t,size_t> getNodeChildrenIndexes(size_t node_index, size_t tree_len){
-    int depth = getNodeDepth(node_index, tree_len);
-    size_t shift = (size_t) pow(BASE, depth);
-    int firstChild = node_index+shift;
+    int firstChild = 2*node_index+1;
     int secondChild = firstChild+1;
 
     if(firstChild >= tree_len){
@@ -58,15 +60,10 @@ size_t getNodeParent(size_t node_index, size_t tree_len){
     int depth = getNodeDepth(node_index, tree_len);
     if(depth <= 0)
         return NOT_EXIST;
-    int is_left_child = node_index % BASE;
-    size_t shift = (size_t) pow(BASE, depth-1);
-    if(!is_left_child)
-        shift++;
-    return node_index-shift;
-    
+    return (node_index-1) / 2;
 }
 
-AdjacencyListNode createNode(size_t node0, size_t node1){
+AdjacencyListNode createNode(int node0, int node1){
     Edge edge = {node0, node1};
     Edge revert = {node1, node0};
     AdjacencyListNode node = {edge, revert};
@@ -95,7 +92,151 @@ vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     return result;
 }
 
+tuple<MPI_Datatype,MPI_Datatype> getCustomTypes(){
+    const int nitems=2;
+    int          blocklengths[2] = {1,1};
+
+    MPI_Datatype edge_types[2] = {MPI_INT, MPI_INT};
+    MPI_Datatype mpi_edge_type;
+    MPI_Aint     edge_offsets[2];
+    edge_offsets[0] = offsetof(Edge, start);
+    edge_offsets[1] = offsetof(Edge, end);
+    MPI_Type_create_struct(nitems, blocklengths, edge_offsets, edge_types, &mpi_edge_type);
+    MPI_Type_commit(&mpi_edge_type);
+
+    MPI_Datatype adj_types[2] = {mpi_edge_type, mpi_edge_type};
+    MPI_Datatype mpi_adj_list_type;
+    MPI_Aint     adj_offsets[2];
+    adj_offsets[0] = offsetof(AdjacencyListNode, forward);
+    adj_offsets[1] = offsetof(AdjacencyListNode, reverse);
+    MPI_Type_create_struct(nitems, blocklengths, adj_offsets, adj_types, &mpi_adj_list_type);
+    MPI_Type_commit(&mpi_adj_list_type);
+
+    return make_tuple(mpi_edge_type, mpi_adj_list_type);
+}
+
+Edge getNextEdge(Edge edge, vector<AdjacencyListNode> *list, int list_size){
+    bool flag = false;
+    vector<AdjacencyListNode> tmp = list[edge.start];
+    for(size_t i = 0; i < tmp.size(); i++){
+        Edge to_compare = tmp[i].forward; 
+        if(flag){
+            return to_compare;
+        }
+        if(to_compare.start == edge.start && to_compare.end == edge.end){
+            flag = true;
+        }
+    }
+    Edge not_exist = {NOT_EXIST, NOT_EXIST};
+    return not_exist;
+}
+
+Edge getFirstNodeEdge(Edge edge, vector<AdjacencyListNode> *list, int list_size){
+    vector<AdjacencyListNode> tmp = list[edge.start];
+    return tmp[0].forward;
+}
+
+bool compareEdges(Edge edge0, Edge edge1){
+    if(edge0.start != edge1.start)
+        return false;
+    if(edge0.end != edge1.end)
+        return false;
+    return true;
+}
+
 int main(int argc, char *argv[]){
+    MPI_Init(&argc, &argv);
+    int procID, processes_num;
+    MPI_Comm_size(MPI_COMM_WORLD, &processes_num);
+    MPI_Comm_rank(MPI_COMM_WORLD, &procID);
+    MPI_Status status;
+
+    MPI_Datatype mpi_edge_type, mpi_adj_list_type; 
+    tie(mpi_edge_type, mpi_adj_list_type) = getCustomTypes();
+
     string input_tree = argv[1];
-    cout << input_tree << endl;
+    size_t node_number = input_tree.length();
+    vector<AdjacencyListNode> ajd_list[node_number];
+    
+    // get adjacency list for specific node and send it to other processes
+    if(procID < node_number){
+        vector<AdjacencyListNode> tmp = getListForNode(procID, input_tree);
+        int size = (int) tmp.size();
+        for(int i = 0; i < processes_num; i++){
+            MPI_Send(&size, 1, MPI_INT, i, TAG, MPI_COMM_WORLD);
+        }
+        for(int i = 0; i < size; i++){
+            AdjacencyListNode el = tmp[i];
+            for(int j = 0; j < processes_num; j++){
+                MPI_Send(&el, 1, mpi_adj_list_type, j, TAG, MPI_COMM_WORLD);
+            }
+        }   
+    }
+
+    // processes receive parts of adjacency list and assemble them to complete list
+    for(size_t i = 0; i < node_number; i++){
+        int size;
+        vector<AdjacencyListNode> list;
+        MPI_Recv(&size, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+        for(int j = 0; j < size; j++){
+            AdjacencyListNode tmp;
+            MPI_Recv(&tmp, 1, mpi_adj_list_type, i, TAG, MPI_COMM_WORLD, &status);
+            list.push_back(tmp);
+        }
+        ajd_list[i] = list;
+    }
+
+    Edge given_edge[processes_num];
+    // assign node to process
+    if(procID == MASTER_ID){
+        int iter = 0;
+        for(int i = 0; i < node_number; i++){
+            for(size_t j = 0; j < ajd_list[i].size(); j++){
+                AdjacencyListNode tmp = ajd_list[i][j];
+                MPI_Send(&tmp, 1, mpi_adj_list_type, iter, TAG, MPI_COMM_WORLD);
+                given_edge[iter] = tmp.forward;
+                iter++;
+            }
+        }
+    }
+    AdjacencyListNode proc_node;
+    MPI_Recv(&proc_node, 1, mpi_adj_list_type, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
+
+    Edge next = getNextEdge(proc_node.reverse, &ajd_list[0], node_number);
+    Edge edge_next;
+    if(next.start == NOT_EXIST){
+        edge_next = getFirstNodeEdge(proc_node.reverse, &ajd_list[0], node_number);
+    }
+    else{
+        edge_next = next;
+    }
+    MPI_Send(&edge_next, 1, mpi_edge_type, MASTER_ID, TAG, MPI_COMM_WORLD);
+
+    vector<Edge> euler_tour;
+    if(procID == MASTER_ID){
+        Edge received_edge[processes_num];
+        for(int i = 0; i < processes_num; i++){
+            Edge received;
+            MPI_Recv(&received, 1, mpi_edge_type, i, TAG, MPI_COMM_WORLD, &status);
+            received_edge[i] = received;
+        }
+
+        // assemble Euler's tour path
+        Edge tmp = given_edge[0];
+        euler_tour.push_back(tmp);
+        for(int i = 0; i < processes_num-1; i++){
+            int iter = 0;
+            while(iter < processes_num){
+                if(compareEdges(tmp, given_edge[iter])){
+                    euler_tour.push_back(received_edge[iter]);
+                    tmp = received_edge[iter];
+                    break;
+                }
+                iter++;
+            }
+        }
+        
+    }
+
+    MPI_Finalize();
 }
