@@ -14,8 +14,10 @@
 using namespace std;
 
 #define BASE 2
+#define FORWARD -1
 #define MASTER_ID 0
 #define NOT_EXIST -1
+#define REVERSE 1
 #define ROOT_INDEX 0
 #define TAG 0
 
@@ -30,19 +32,6 @@ typedef struct adj_node {
     Edge reverse;
 } AdjacencyListNode;
 
-int getNodeDepth(size_t node_index, size_t tree_len){
-    int i = 0;
-    size_t sum = 0;
-    while(sum <= tree_len){
-        sum += (int) pow(BASE, i);
-        if (node_index < sum){
-            break;
-        }
-        i++;
-    }
-    return i;
-}
-
 tuple<size_t,size_t> getNodeChildrenIndexes(size_t node_index, size_t tree_len){
     int firstChild = 2*node_index+1;
     int secondChild = firstChild+1;
@@ -56,9 +45,8 @@ tuple<size_t,size_t> getNodeChildrenIndexes(size_t node_index, size_t tree_len){
     return make_tuple(firstChild, secondChild);
 }
 
-size_t getNodeParent(size_t node_index, size_t tree_len){
-    int depth = getNodeDepth(node_index, tree_len);
-    if(depth <= 0)
+size_t getNodeParent(size_t node_index){
+    if(node_index == 0)
         return NOT_EXIST;
     return (node_index-1) / 2;
 }
@@ -74,7 +62,7 @@ vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     vector<AdjacencyListNode> result;
     size_t left_child, right_child;
     size_t tree_len = tree.length();
-    size_t parent = getNodeParent(node_index, tree_len);
+    size_t parent = getNodeParent(node_index);
     tie(left_child, right_child) = getNodeChildrenIndexes(node_index, tree_len);
 
     if(parent != NOT_EXIST){
@@ -144,11 +132,23 @@ bool compareEdges(Edge edge0, Edge edge1){
     return true;
 }
 
+bool isForwardEdge(Edge edge){
+    return edge.start < edge.end;
+}
+
+void printResult(int *level, string &tree){
+    int size = tree.length();
+    for(int i = 0; i < size-1; i++){
+        cout << tree[i] << ":" << level[i] << ",";
+    }
+    cout << tree[size-1] << ":" << level[size-1] << endl;
+}
+
 int main(int argc, char *argv[]){
     MPI_Init(&argc, &argv);
-    int procID, processes_num;
+    int proc_id, processes_num;
     MPI_Comm_size(MPI_COMM_WORLD, &processes_num);
-    MPI_Comm_rank(MPI_COMM_WORLD, &procID);
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
     MPI_Status status;
 
     MPI_Datatype mpi_edge_type, mpi_adj_list_type; 
@@ -159,8 +159,8 @@ int main(int argc, char *argv[]){
     vector<AdjacencyListNode> ajd_list[node_number];
     
     // get adjacency list for specific node and send it to other processes
-    if(procID < node_number){
-        vector<AdjacencyListNode> tmp = getListForNode(procID, input_tree);
+    if(proc_id < node_number){
+        vector<AdjacencyListNode> tmp = getListForNode(proc_id, input_tree);
         int size = (int) tmp.size();
         for(int i = 0; i < processes_num; i++){
             MPI_Send(&size, 1, MPI_INT, i, TAG, MPI_COMM_WORLD);
@@ -188,7 +188,7 @@ int main(int argc, char *argv[]){
 
     Edge given_edge[processes_num];
     // assign node to process
-    if(procID == MASTER_ID){
+    if(proc_id == MASTER_ID){
         int iter = 0;
         for(int i = 0; i < node_number; i++){
             for(size_t j = 0; j < ajd_list[i].size(); j++){
@@ -212,8 +212,8 @@ int main(int argc, char *argv[]){
     }
     MPI_Send(&edge_next, 1, mpi_edge_type, MASTER_ID, TAG, MPI_COMM_WORLD);
 
-    vector<Edge> euler_tour;
-    if(procID == MASTER_ID){
+    Edge euler_tour[processes_num];
+    if(proc_id == MASTER_ID){
         Edge received_edge[processes_num];
         for(int i = 0; i < processes_num; i++){
             Edge received;
@@ -223,19 +223,118 @@ int main(int argc, char *argv[]){
 
         // assemble Euler's tour path
         Edge tmp = given_edge[0];
-        euler_tour.push_back(tmp);
-        for(int i = 0; i < processes_num-1; i++){
+        euler_tour[0] = tmp;
+        for(int i = 1; i < processes_num; i++){
             int iter = 0;
             while(iter < processes_num){
                 if(compareEdges(tmp, given_edge[iter])){
-                    euler_tour.push_back(received_edge[iter]);
+                    euler_tour[i] = received_edge[iter];
                     tmp = received_edge[iter];
                     break;
                 }
                 iter++;
             }
         }
-        
+    }
+    MPI_Bcast(euler_tour, processes_num, mpi_edge_type, MASTER_ID, MPI_COMM_WORLD);
+
+    int weights[processes_num];
+    int w;
+    Edge proc_edge = euler_tour[proc_id];
+    if(proc_edge.start < proc_edge.end){
+        w = FORWARD;
+    }
+    else{
+        w = REVERSE;
+    }
+    MPI_Send(&w, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+
+    if(proc_id == MASTER_ID){
+        for(int i = 0; i < processes_num; i++){
+            int tmp;
+            MPI_Recv(&tmp, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+            weights[i] = tmp;
+        }
+    }
+    MPI_Bcast(weights, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
+    
+    // suffix sum
+    int suffix_val[processes_num];
+    int succ = proc_id + 1;
+    int suffix;
+    if(succ >= processes_num){
+        suffix = weights[proc_id];
+    }
+    else {
+        suffix = weights[proc_id];
+    }
+
+    MPI_Send(&suffix, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+    if(proc_id == MASTER_ID){
+        for(int i = 0; i < processes_num; i++){
+            int tmp;
+            MPI_Recv(&tmp, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+            suffix_val[i] = tmp;
+        }
+    }
+    MPI_Bcast(suffix_val, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
+
+    int limit = (int) (log2(processes_num)+0.5);
+    int successor, successor_i;
+    for(int k = 0; k < limit; k++){
+        successor_i = proc_id + (int) pow(BASE, k);
+        if(successor_i >= processes_num)
+            successor = 0;
+        else
+            successor = suffix_val[successor_i];
+        suffix_val[proc_id] += successor;
+
+        MPI_Send(&(suffix_val[proc_id]), 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+
+        if(proc_id == MASTER_ID){
+            for(int i = 0; i < processes_num; i++){
+                int tmp;
+                MPI_Recv(&tmp, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+                suffix_val[i] = tmp;
+            }
+        }
+        MPI_Bcast(suffix_val, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
+    }
+
+    // if(suffix_val[processes_num-1] != 0)
+    //     suffix_val[proc_id] += suffix_val[processes_num-1];
+    // MPI_Send(&(suffix_val[proc_id]), 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+
+    // if(proc_id == MASTER_ID){
+    //     for(int i = 0; i < processes_num; i++){
+    //         int tmp;
+    //         MPI_Recv(&tmp, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+    //         suffix_val[i] = tmp;
+    //     }
+    // }
+    // MPI_Bcast(suffix_val, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
+
+    int result[node_number];
+    int node_level = 0;
+    int pos = -1;
+    if(isForwardEdge(euler_tour[proc_id])){
+        pos = euler_tour[proc_id].end;
+        node_level = suffix_val[proc_id] + 1;
+    }
+    MPI_Send(&pos, 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
+    MPI_Send(&node_level, 1, MPI_INT, MASTER_ID, TAG+1, MPI_COMM_WORLD);
+    
+    if(proc_id == MASTER_ID){
+        for(int i = 0; i < processes_num; i++){
+            int tmp_value, tmp_pos;
+            MPI_Recv(&tmp_pos, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv(&tmp_value, 1, MPI_INT, i, TAG+1, MPI_COMM_WORLD, &status);
+            if(tmp_pos != NOT_EXIST)
+                result[tmp_pos] = tmp_value;
+        }
+        result[MASTER_ID] = 0;
+
+        printResult(result, input_tree);
     }
 
     MPI_Finalize();
