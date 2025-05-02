@@ -144,6 +144,26 @@ void printResult(int *level, string &tree){
     cout << tree[size-1] << ":" << level[size-1] << endl;
 }
 
+void calculateAndSendEulersTourParts(vector<AdjacencyListNode> *ajd_list, int node_number, MPI_Status *status){
+    MPI_Datatype mpi_edge_type, mpi_adj_list_type; 
+    tie(mpi_edge_type, mpi_adj_list_type) = getCustomTypes();
+
+    // process receive its node
+    AdjacencyListNode proc_node;
+    MPI_Recv(&proc_node, 1, mpi_adj_list_type, MASTER_ID, TAG, MPI_COMM_WORLD, status);
+
+    // do Euler's tour in parallel
+    Edge next = getNextEdge(proc_node.reverse, ajd_list, node_number);
+    Edge edge_next;
+    if(next.start == NOT_EXIST){
+        edge_next = getFirstNodeEdge(proc_node.reverse, ajd_list, node_number);
+    }
+    else{
+        edge_next = next;
+    }
+    MPI_Send(&edge_next, 1, mpi_edge_type, MASTER_ID, TAG, MPI_COMM_WORLD);
+}
+
 int main(int argc, char *argv[]){
     MPI_Init(&argc, &argv);
     int proc_id, processes_num;
@@ -151,11 +171,20 @@ int main(int argc, char *argv[]){
     MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
     MPI_Status status;
 
+    // prepare custom MPI data types
     MPI_Datatype mpi_edge_type, mpi_adj_list_type; 
     tie(mpi_edge_type, mpi_adj_list_type) = getCustomTypes();
 
     string input_tree = argv[1];
     size_t node_number = input_tree.length();
+
+    // check if tree is not only root node
+    if(node_number < 2){
+        cout << input_tree[0] << ":0" << endl;
+        MPI_Finalize();
+        exit(0);
+    }
+
     vector<AdjacencyListNode> ajd_list[node_number];
     
     // get adjacency list for specific node and send it to other processes
@@ -168,7 +197,7 @@ int main(int argc, char *argv[]){
         for(int i = 0; i < size; i++){
             AdjacencyListNode el = tmp[i];
             for(int j = 0; j < processes_num; j++){
-                MPI_Send(&el, 1, mpi_adj_list_type, j, TAG, MPI_COMM_WORLD);
+                MPI_Send(&el, 1, mpi_adj_list_type, j, TAG+1, MPI_COMM_WORLD);
             }
         }   
     }
@@ -180,13 +209,15 @@ int main(int argc, char *argv[]){
         MPI_Recv(&size, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
         for(int j = 0; j < size; j++){
             AdjacencyListNode tmp;
-            MPI_Recv(&tmp, 1, mpi_adj_list_type, i, TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv(&tmp, 1, mpi_adj_list_type, i, TAG+1, MPI_COMM_WORLD, &status);
             list.push_back(tmp);
         }
         ajd_list[i] = list;
     }
 
+    // array to store which edge was given to which process
     Edge given_edge[processes_num];
+
     // assign node to process
     if(proc_id == MASTER_ID){
         int iter = 0;
@@ -199,19 +230,10 @@ int main(int argc, char *argv[]){
             }
         }
     }
-    AdjacencyListNode proc_node;
-    MPI_Recv(&proc_node, 1, mpi_adj_list_type, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
 
-    Edge next = getNextEdge(proc_node.reverse, &ajd_list[0], node_number);
-    Edge edge_next;
-    if(next.start == NOT_EXIST){
-        edge_next = getFirstNodeEdge(proc_node.reverse, &ajd_list[0], node_number);
-    }
-    else{
-        edge_next = next;
-    }
-    MPI_Send(&edge_next, 1, mpi_edge_type, MASTER_ID, TAG, MPI_COMM_WORLD);
-
+    calculateAndSendEulersTourParts(&ajd_list[0], node_number, &status);
+    
+    // master process receive parts of Euler tour from processes
     Edge euler_tour[processes_num];
     if(proc_id == MASTER_ID){
         Edge received_edge[processes_num];
@@ -281,7 +303,7 @@ int main(int argc, char *argv[]){
 
     int limit = (int) (log2(processes_num)+0.5);
     int successor, successor_i;
-    for(int k = 0; k < limit; k++){
+    for(int k = 0; k <= limit; k++){
         successor_i = proc_id + (int) pow(BASE, k);
         if(successor_i >= processes_num)
             successor = 0;
@@ -300,20 +322,7 @@ int main(int argc, char *argv[]){
         }
         MPI_Bcast(suffix_val, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
     }
-
-    // if(suffix_val[processes_num-1] != 0)
-    //     suffix_val[proc_id] += suffix_val[processes_num-1];
-    // MPI_Send(&(suffix_val[proc_id]), 1, MPI_INT, MASTER_ID, TAG, MPI_COMM_WORLD);
-
-    // if(proc_id == MASTER_ID){
-    //     for(int i = 0; i < processes_num; i++){
-    //         int tmp;
-    //         MPI_Recv(&tmp, 1, MPI_INT, i, TAG, MPI_COMM_WORLD, &status);
-    //         suffix_val[i] = tmp;
-    //     }
-    // }
-    // MPI_Bcast(suffix_val, processes_num, MPI_INT, MASTER_ID, MPI_COMM_WORLD);
-
+    
     int result[node_number];
     int node_level = 0;
     int pos = -1;
