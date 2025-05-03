@@ -5,12 +5,14 @@ if [ $# -ne 1 ]; then
 fi;
 
 
+# check input tree len
 length=${#1}
 if [ $length -lt 1 ]; then
+  >&2 echo "empty input tree"
   exit 1; 
 fi;
 
-# preklad
+
 mpic++ --prefix /usr/local/share/OpenMPI -o vuv vuv.cpp
 
 proc_number=$(((2*length)-2))

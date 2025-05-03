@@ -17,7 +17,7 @@ class bcolors:
 
 
 def run_test(input, expected_output):
-    test = subprocess.Popen([BIN, input], stdout=subprocess.PIPE)
+    test = subprocess.Popen([BIN, input], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = test.stdout.read().decode()
     if expected_output == output:
         print(f"    {bcolors.BOLD}{bcolors.OKGREEN}PASSED{bcolors.ENDC}")
