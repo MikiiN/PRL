@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Project: PRL-proj2
+# Author:  Michal Žatečka xzatec02
+# Date:    03.05.2025
+
+
 if [ $# -ne 1 ]; then
   exit 1;
 fi;
