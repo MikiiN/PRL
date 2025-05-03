@@ -22,16 +22,28 @@ using namespace std;
 #define TAG 0
 
 
+/**
+ * a struct representing an edge
+ */
 typedef struct g_edge {
     int start;
     int end;
 }Edge; 
 
+/**
+ * a struct representing an adjacency list node
+ */
 typedef struct adj_node {
     Edge forward;
     Edge reverse;
 } AdjacencyListNode;
 
+/**
+ * get children nodes of the given node
+ * @param node_index given node index
+ * @param tree_len number of tree nodes
+ * @return tuple, that contains indexes of the left and right children
+ */
 tuple<size_t,size_t> getNodeChildrenIndexes(size_t node_index, size_t tree_len){
     int firstChild = 2*node_index+1;
     int secondChild = firstChild+1;
@@ -45,19 +57,37 @@ tuple<size_t,size_t> getNodeChildrenIndexes(size_t node_index, size_t tree_len){
     return make_tuple(firstChild, secondChild);
 }
 
+/**
+ * get the parent node of the given node
+ * @param node_index index of the given node
+ * @return index of the parent node
+ */
 size_t getNodeParent(size_t node_index){
     if(node_index == 0)
         return NOT_EXIST;
     return (node_index-1) / 2;
 }
 
+/**
+ * create single node of adjacency list (forward and reverse edge) from 
+ * given nodes
+ * @param node0 start (or end) of forward (or reverse) edge 
+ * @param node1 end (or start) of forward (or reverse) edge
+ * @return created node
+ */
 AdjacencyListNode createNode(int node0, int node1){
     Edge edge = {node0, node1};
-    Edge revert = {node1, node0};
-    AdjacencyListNode node = {edge, revert};
+    Edge reverse = {node1, node0};
+    AdjacencyListNode node = {edge, reverse};
     return node;
 }
 
+/**
+ * construct list of edges (forward and reverse) for the given tree node
+ * @param node_index given tree node
+ * @param tree input tree
+ * @return element (list) of Adjacency list for given node
+ */
 vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     vector<AdjacencyListNode> result;
     size_t left_child, right_child;
@@ -65,6 +95,7 @@ vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     size_t parent = getNodeParent(node_index);
     tie(left_child, right_child) = getNodeChildrenIndexes(node_index, tree_len);
 
+    // append edge if exists
     if(parent != NOT_EXIST){
         AdjacencyListNode p_node = createNode(node_index, parent);
         result.push_back(p_node);
@@ -80,6 +111,10 @@ vector<AdjacencyListNode> getListForNode(size_t node_index, string tree){
     return result;
 }
 
+/**
+ * create custom MPI datatypes for Edge and AdjacencyListNode structs
+ * @return tuple, that contains created custom types 
+ */
 tuple<MPI_Datatype,MPI_Datatype> getCustomTypes(){
     const int nitems=2;
     int          blocklengths[2] = {1,1};
@@ -105,27 +140,12 @@ tuple<MPI_Datatype,MPI_Datatype> getCustomTypes(){
     return make_tuple(mpi_edge_type, mpi_adj_list_type);
 }
 
-Edge getNextEdge(Edge edge, vector<AdjacencyListNode> *list, int list_size){
-    bool flag = false;
-    vector<AdjacencyListNode> tmp = list[edge.start];
-    for(size_t i = 0; i < tmp.size(); i++){
-        Edge to_compare = tmp[i].forward; 
-        if(flag){
-            return to_compare;
-        }
-        if(to_compare.start == edge.start && to_compare.end == edge.end){
-            flag = true;
-        }
-    }
-    Edge not_exist = {NOT_EXIST, NOT_EXIST};
-    return not_exist;
-}
-
-Edge getFirstNodeEdge(Edge edge, vector<AdjacencyListNode> *list, int list_size){
-    vector<AdjacencyListNode> tmp = list[edge.start];
-    return tmp[0].forward;
-}
-
+/**
+ * determine if given edges are equal
+ * @param edge0 first edge to compare
+ * @param edge1 second edge to compare
+ * @return true if edges are equal, false otherwise
+ */
 bool compareEdges(Edge edge0, Edge edge1){
     if(edge0.start != edge1.start)
         return false;
@@ -134,16 +154,60 @@ bool compareEdges(Edge edge0, Edge edge1){
     return true;
 }
 
+/**
+ * return edge which follows given edge in Adjacency list node
+ * @param edge given edge
+ * @param list adjacency list
+ * @return following edge 
+ */
+Edge getNextEdge(Edge edge, vector<AdjacencyListNode> *list){
+    bool flag = false;
+    vector<AdjacencyListNode> tmp = list[edge.start];
+    // find given edge in adjacency list node and return following edge 
+    for(size_t i = 0; i < tmp.size(); i++){
+        Edge to_compare = tmp[i].forward; 
+        if(flag)
+            return to_compare;
+        if(compareEdges(to_compare, edge))
+            flag = true;
+    }
+    // didn't find given edge or given edge was last node in list
+    Edge not_exist = {NOT_EXIST, NOT_EXIST};
+    return not_exist;
+}
+
+/**
+ * get forward edge from first node of choosen linked list (by given edge) 
+ * in Adjacency list
+ * @param edge given edge
+ * @param list adjacency list 
+ * @return correct forward edge of linked list   
+ */
+Edge getFirstNodeEdge(Edge edge, vector<AdjacencyListNode> *list){
+    vector<AdjacencyListNode> tmp = list[edge.start];
+    return tmp[0].forward;
+}
+
+/**
+ * determine if given edge is forward or reverse edge
+ * @param edge given edge
+ * @return true if forward and false if reverse
+ */
 bool isForwardEdge(Edge edge){
     return edge.start < edge.end;
 }
 
-void printResult(int *level, string &tree){
+/**
+ * function for format and print result
+ * @param node_level array mapping node indexes to the nodes level
+ * @param tree input tree 
+ */
+void printResult(int *node_level, string &tree){
     int size = tree.length();
     for(int i = 0; i < size-1; i++){
-        cout << tree[i] << ":" << level[i] << ",";
+        cout << tree[i] << ":" << node_level[i] << ",";
     }
-    cout << tree[size-1] << ":" << level[size-1] << endl;
+    cout << tree[size-1] << ":" << node_level[size-1] << endl;
 }
 
 /**
@@ -196,18 +260,16 @@ void getAdjList(vector<AdjacencyListNode> *adj_list,
  * adjacency list element in Euler's tour
  * @param adj_list pointer on adjacency list
  * @param proc_node given adjacency list element
- * @param node_number number of nodes in tree
  * @param status pointer on status of reception operation
  * @return following edge
  */
 Edge getEulersTourPart(vector<AdjacencyListNode> *adj_list, 
                               AdjacencyListNode &proc_node, 
-                              int node_number, 
                               MPI_Status *status){
-    Edge next = getNextEdge(proc_node.reverse, adj_list, node_number);
+    Edge next = getNextEdge(proc_node.reverse, adj_list);
     Edge edge_next;
     if(next.start == NOT_EXIST){
-        edge_next = getFirstNodeEdge(proc_node.reverse, adj_list, node_number);
+        edge_next = getFirstNodeEdge(proc_node.reverse, adj_list);
     }
     else{
         edge_next = next;
@@ -331,7 +393,7 @@ int main(int argc, char *argv[]){
 
     AdjacencyListNode proc_node;
     MPI_Recv(&proc_node, 1, mpi_adj_list_type, MASTER_ID, TAG, MPI_COMM_WORLD, &status);
-    Edge part = getEulersTourPart(&ajd_list[0], proc_node, node_number, &status);
+    Edge part = getEulersTourPart(&ajd_list[0], proc_node, &status);
     MPI_Send(&part, 1, mpi_edge_type, MASTER_ID, TAG, MPI_COMM_WORLD);
     
     Edge euler_tour[processes_num];
