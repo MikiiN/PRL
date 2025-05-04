@@ -24,9 +24,9 @@ proc_number=$(((2*length)-2))
 
 # check if number of processes is not 0 (input tree has single node)
 if [ $proc_number == 0 ]; then
-  mpirun --oversubscribe -np 1 ./vuv $1
+  mpirun --oversubscribe -np 1 ./vuv "$1"
 else
-  mpirun --oversubscribe -np $proc_number ./vuv $1 
+  mpirun --oversubscribe -np $proc_number ./vuv "$1" 
 fi;
 
 # clean up
